@@ -1,0 +1,83 @@
+networks:
+  red-monitoreo:
+    driver: bridge
+
+services:
+  rabbitmq:
+    image: rabbitmq:3-management
+    container_name: rabbitmq
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    networks:
+      - red-monitoreo
+
+  web-server:
+    build: ./app
+    container_name: web-server
+    ports:
+      - "8000:8000"
+    command: uvicorn app:app --host 0.0.0.0 --port 8000 --workers 4
+    depends_on:
+      - rabbitmq
+    networks:
+      - red-monitoreo
+
+  celery-worker:
+    build: ./app
+    container_name: celery-worker
+    command: celery -A tasks worker --loglevel=info
+    depends_on:
+      - rabbitmq
+    networks:
+      - red-monitoreo
+
+  # REEMPLAZO: Node Exporter para recolectar el hardware de forma compatible
+  node-exporter:
+    image: prom/node-exporter:latest
+    container_name: node-exporter
+    volumes:
+      - /proc:/host/proc:ro
+      - /sys:/host/sys:ro
+      - /:/rootfs:ro
+    command:
+      - '--path.procfs=/host/proc'
+      - '--path.sysfs=/host/sys'
+      - '--collector.filesystem.ignored-mount-points=^/(sys|proc|dev|host|etc)($$|/)'
+    ports:
+      - "9100:9100"
+    networks:
+      - red-monitoreo
+
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: prometheus
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
+    ports:
+      - "9090:9090"
+    depends_on:
+      - node-exporter
+    networks:
+      - red-monitoreo
+
+  grafana:
+    image: grafana/grafana:latest
+    container_name: grafana
+    ports:
+      - "3000:3000"
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+    networks:
+      - red-monitoreo
+
+  locust:
+    image: locustio/locust:latest
+    container_name: locust
+    volumes:
+      - ./:/mnt/locust
+    ports:
+      - "8089:8089"
+    command: -f /mnt/locust/locustfile.py
+    networks:
+      - red-monitoreo
